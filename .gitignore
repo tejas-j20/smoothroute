@@ -1,0 +1,16 @@
+# Node / frontend
+node_modules/
+dist/
+.env
+.env.*
+
+# Python / backend / analysis
+__pycache__/
+venv/
+.venv/
+.ipynb_checkpoints/
+*.db
+
+# Editors / OS
+.vscode/
+.DS_Store
