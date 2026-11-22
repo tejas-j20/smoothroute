@@ -1,6 +1,7 @@
 main { max-width: 480px; margin: 0 auto; padding: 16px; }
-.card { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+.card { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.08); margin-bottom: 14px; }
 h1 { margin: 0 0 10px; font-size: 1.4rem; color: #1585c7; }
+h2 { margin: 0 0 10px; font-size: 1.1rem; color: #1585c7; }
 p, li { line-height: 1.45; }
 .hint { color: #555; font-size: .92rem; }
 .warn { background: #fff4e5; border-left: 4px solid #e08a00; padding: 8px 10px; border-radius: 6px; font-size: .92rem; }
@@ -23,3 +24,15 @@ button:disabled { opacity: .5; cursor: default; }
 .marks { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .mark { background: #ffb300; color: #1b1f24; font-weight: 800; font-size: 1.25rem; padding: 22px 10px; margin-top: 0; }
 .mark:active { background: #ff8f00; }
+
+/* ---- Stage 2: map and saved rides ---- */
+.map { height: 320px; border-radius: 10px; margin: 12px 0 6px; z-index: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .85rem; margin-bottom: 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+.saved .ride { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #e3e8ee; font-size: .9rem; }
+.saved .ride:first-of-type { border-top: 0; }
+.ride-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.small { width: auto; margin-top: 0; padding: 8px 12px; font-size: .85rem; background: #eef5fb; color: #1585c7; font-weight: 700; }
+.danger { background: #fdeaea; color: #c62828; }
+.badge { margin-left: 8px; font-size: .7rem; background: #fff4e5; color: #b26a00; padding: 2px 6px; border-radius: 6px; }

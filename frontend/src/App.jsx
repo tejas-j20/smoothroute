@@ -3,20 +3,47 @@ import './App.css'
 import PermissionScreen from './components/PermissionScreen'
 import LiveReadout from './components/LiveReadout'
 import MarkPanel from './components/MarkPanel'
+import RideResult from './components/RideResult'
+import SavedRides from './components/SavedRides'
 import { requestMotionPermission, useMotion } from './hooks/useMotion'
 import { requestLocationPermission, useGeolocation } from './hooks/useGeolocation'
 import { useWakeLock } from './hooks/useWakeLock'
-import { toCsv, downloadText } from './utils/csv'
+import { toCsv, downloadText, csvFilename } from './utils/csv'
+import { saveSession, saveChunk, loadSession, deleteSession } from './utils/storage'
+
+const AUTOSAVE_MS = 5000
+
+// Turns a ride (just finished, or loaded from storage) into what the result screen shows.
+function buildResult(session, samples) {
+  const lastTime = samples.length ? samples[samples.length - 1].t : session.startedAt
+  return {
+    id: session.id,
+    status: session.status,
+    meta: session.meta || {},
+    startedAt: session.startedAt,
+    endedAt: session.endedAt ?? lastTime,
+    samples,
+    marks: session.marks || [],
+  }
+}
+
+function downloadResult(r) {
+  const csv = toCsv({ ...r.meta, startedAt: r.startedAt, endedAt: r.endedAt }, r.samples, r.marks)
+  downloadText(csvFilename(r.startedAt), csv)
+}
 
 export default function App() {
-  // permission -> ready -> recording -> finished
+  // permission -> ready -> recording -> result
   const [phase, setPhase] = useState('permission')
+  const [backPhase, setBackPhase] = useState('ready')
   const [perm, setPerm] = useState({ motion: 'unknown', location: 'unknown' })
   const [busy, setBusy] = useState(false)
   const [meta, setMeta] = useState({ phone: '', mount: 'holder', vehicle: '', road: '' })
   const [live, setLive] = useState(null)
   const [marksCount, setMarksCount] = useState(0)
-  const [summary, setSummary] = useState(null)
+  const [result, setResult] = useState(null)
+  const [savedKey, setSavedKey] = useState(0) // bump this to reload the saved-rides list
+  const [storageOk, setStorageOk] = useState(true)
 
   // Data lives in refs: the sensor fires dozens of times a second and storing
   // it in React state would make the page lag.
@@ -26,6 +53,9 @@ export default function App() {
   const latestMotion = useRef(null)
   const motionCount = useRef(0)
   const startedAt = useRef(0)
+  const metaRef = useRef(meta)
+  const sessionRef = useRef(null) // { id, savedCount, chunkSeq } for the ride being recorded
+  const saveQueue = useRef(Promise.resolve()) // saves run one after another
 
   const geo = useGeolocation()
   const sensorsOn = phase === 'ready' || phase === 'recording'
@@ -52,6 +82,56 @@ export default function App() {
 
   useMotion(sensorsOn, onSample)
   useWakeLock(recording)
+
+  // Autosave: write the readings that are new since the last save, plus the
+  // small ride record (notes, marks, status). Saves are queued so two never overlap.
+  const persist = useCallback((status, endedAt = null) => {
+    const sess = sessionRef.current
+    if (!sess) return Promise.resolve()
+    const job = {
+      rows: samples.current,
+      marks: marks.current.slice(),
+      meta: metaRef.current,
+      startedAt: startedAt.current,
+    }
+    saveQueue.current = saveQueue.current.then(async () => {
+      try {
+        const fresh = job.rows.slice(sess.savedCount)
+        if (fresh.length > 0) {
+          await saveChunk(sess.id, sess.chunkSeq, fresh)
+          sess.chunkSeq += 1
+          sess.savedCount += fresh.length
+        }
+        await saveSession({
+          id: sess.id,
+          startedAt: job.startedAt,
+          endedAt,
+          status,
+          meta: job.meta,
+          marks: job.marks,
+          sampleCount: sess.savedCount,
+        })
+        setStorageOk(true)
+      } catch {
+        setStorageOk(false)
+      }
+    })
+    return saveQueue.current
+  }, [])
+
+  // While recording: save every few seconds, and also when the page is hidden.
+  useEffect(() => {
+    if (!recording) return undefined
+    const id = setInterval(() => persist('recording'), AUTOSAVE_MS)
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') persist('recording')
+    }
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onHide)
+    }
+  }, [recording, persist])
 
   // GPS runs in "ready" too, so a good fix exists before recording starts.
   useEffect(() => {
@@ -98,27 +178,42 @@ export default function App() {
   }
 
   const startRecording = () => {
+    const id = Date.now()
     samples.current = []
     marks.current = []
     motionCount.current = 0
-    startedAt.current = Date.now()
+    startedAt.current = id
+    metaRef.current = meta
+    sessionRef.current = { id, savedCount: 0, chunkSeq: 0 }
     recordingRef.current = true
     setMarksCount(0)
     setPhase('recording')
+    persist('recording')
+    // Ask the browser not to delete saved rides when storage runs low.
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {})
+    }
   }
 
   const stopRecording = () => {
     recordingRef.current = false
     const endedAt = Date.now()
-    const seconds = (endedAt - startedAt.current) / 1000
-    setSummary({
-      endedAt,
-      readings: samples.current.length,
-      marks: marks.current.length,
-      seconds,
-      rate: seconds > 0 ? samples.current.length / seconds : 0,
-    })
-    setPhase('finished')
+    setResult(
+      buildResult(
+        {
+          id: sessionRef.current.id,
+          status: 'finished',
+          meta: metaRef.current,
+          startedAt: startedAt.current,
+          endedAt,
+          marks: marks.current.slice(),
+        },
+        samples.current,
+      ),
+    )
+    setBackPhase('ready')
+    setPhase('result')
+    persist('finished', endedAt).then(() => setSavedKey((k) => k + 1))
   }
 
   const addMark = (type) => {
@@ -141,28 +236,69 @@ export default function App() {
     setMarksCount(marks.current.length)
   }
 
-  const download = () => {
-    const csv = toCsv(
-      { ...meta, startedAt: startedAt.current, endedAt: summary.endedAt },
-      samples.current,
-      marks.current,
-    )
-    const stamp = new Date(startedAt.current).toISOString().slice(0, 19).replace(/[:T]/g, '-')
-    downloadText(`smoothroute_${stamp}.csv`, csv)
+  // ----- saved rides (autosaved on this phone) -----
+  const openSaved = async (id) => {
+    try {
+      const { session, samples: rows } = await loadSession(id)
+      if (!session) return
+      setResult(buildResult(session, rows))
+      setBackPhase(phase)
+      setPhase('result')
+    } catch {
+      setStorageOk(false)
+    }
   }
 
-  const newSession = () => {
-    samples.current = []
-    marks.current = []
-    setMarksCount(0)
-    setSummary(null)
-    setPhase('ready')
+  const downloadSaved = async (id) => {
+    try {
+      const { session, samples: rows } = await loadSession(id)
+      if (session) downloadResult(buildResult(session, rows))
+    } catch {
+      setStorageOk(false)
+    }
   }
+
+  const removeSaved = async (id) => {
+    if (!window.confirm('Delete this saved ride from this phone?')) return
+    try {
+      await deleteSession(id)
+      setSavedKey((k) => k + 1)
+    } catch {
+      setStorageOk(false)
+    }
+  }
+
+  const closeResult = () => {
+    setResult(null)
+    setPhase(backPhase)
+  }
+
+  const saved = (
+    <SavedRides
+      refreshKey={savedKey}
+      onOpen={openSaved}
+      onDownload={downloadSaved}
+      onDelete={removeSaved}
+    />
+  )
 
   if (phase === 'permission') {
     return (
       <main>
         <PermissionScreen perm={perm} busy={busy} onAllow={handleAllow} />
+        {saved}
+      </main>
+    )
+  }
+
+  if (phase === 'result' && result) {
+    return (
+      <main>
+        <RideResult
+          result={result}
+          onDownload={() => downloadResult(result)}
+          onClose={closeResult}
+        />
       </main>
     )
   }
@@ -173,62 +309,56 @@ export default function App() {
   return (
     <main>
       {phase === 'ready' && (
-        <div className="card">
-          <h1>Get ready</h1>
-          <p className="hint">
-            Sensor check: move the phone and watch &quot;Shake strength&quot; change. Wait
-            until GPS accuracy is low (about 20 m or better) before you start.
-          </p>
-          <LiveReadout live={live} marksCount={0} recording={false} />
-          {noMotion && (
-            <p className="warn">
-              No motion data yet. Allow &quot;Motion sensors&quot; for this site in your
-              browser settings, or try another browser.
+        <>
+          <div className="card">
+            <h1>Get ready</h1>
+            <p className="hint">
+              Sensor check: move the phone and watch &quot;Shake strength&quot; change. Wait
+              until GPS accuracy is low (about 20 m or better) before you start.
             </p>
-          )}
+            <LiveReadout live={live} marksCount={0} recording={false} />
+            {noMotion && (
+              <p className="warn">
+                No motion data yet. Allow &quot;Motion sensors&quot; for this site in your
+                browser settings, or try another browser.
+              </p>
+            )}
 
-          <label>Phone model
-            <input value={meta.phone} onChange={set('phone')} placeholder="e.g. Redmi Note 11" />
-          </label>
-          <label>How is the phone placed?
-            <select value={meta.mount} onChange={set('mount')}>
-              <option value="holder">Fixed in a holder</option>
-              <option value="mat">Flat on a non-slip mat</option>
-              <option value="hand">Held in hand</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label>Vehicle
-            <input value={meta.vehicle} onChange={set('vehicle')} placeholder="e.g. scooter, car, bicycle" />
-          </label>
-          <label>Road / route
-            <input value={meta.road} onChange={set('road')} placeholder="e.g. campus main road" />
-          </label>
+            <label>Phone model
+              <input value={meta.phone} onChange={set('phone')} placeholder="e.g. Redmi Note 11" />
+            </label>
+            <label>How is the phone placed?
+              <select value={meta.mount} onChange={set('mount')}>
+                <option value="holder">Fixed in a holder</option>
+                <option value="mat">Flat on a non-slip mat</option>
+                <option value="hand">Held in hand</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>Vehicle
+              <input value={meta.vehicle} onChange={set('vehicle')} placeholder="e.g. scooter, car, bicycle" />
+            </label>
+            <label>Road / route
+              <input value={meta.road} onChange={set('road')} placeholder="e.g. campus main road" />
+            </label>
 
-          <button className="primary" onClick={startRecording}>Start recording</button>
-        </div>
+            <button className="primary" onClick={startRecording}>Start recording</button>
+          </div>
+          {saved}
+        </>
       )}
 
       {phase === 'recording' && (
         <div className="card">
           <h1>Recording</h1>
           <LiveReadout live={live} marksCount={marksCount} recording />
+          {!storageOk && (
+            <p className="warn">
+              Autosave is not working in this browser. Download the CSV before you leave the page.
+            </p>
+          )}
           <MarkPanel onMark={addMark} onUndo={undoMark} marksCount={marksCount} />
           <button className="stop" onClick={stopRecording}>Stop recording</button>
-        </div>
-      )}
-
-      {phase === 'finished' && summary && (
-        <div className="card">
-          <h1>Recording finished</h1>
-          <ul>
-            <li>Readings: <b>{summary.readings}</b></li>
-            <li>Bumps marked: <b>{summary.marks}</b></li>
-            <li>Duration: <b>{Math.round(summary.seconds)} s</b></li>
-            <li>Average sensor rate: <b>{summary.rate.toFixed(0)} per second</b></li>
-          </ul>
-          <button className="primary" onClick={download}>Download CSV</button>
-          <button className="link" onClick={newSession}>New session</button>
         </div>
       )}
     </main>

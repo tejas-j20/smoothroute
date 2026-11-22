@@ -1,8 +1,4 @@
-export const MARK_TYPES = [
-  { key: 'speed_breaker', label: 'Speed breaker' },
-  { key: 'pothole', label: 'Pothole' },
-  { key: 'rough_patch', label: 'Rough patch' },
-]
+import { MARK_TYPES } from '../utils/marks'
 
 export default function MarkPanel({ onMark, onUndo, marksCount }) {
   return (

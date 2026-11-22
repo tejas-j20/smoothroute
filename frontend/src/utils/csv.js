@@ -59,3 +59,9 @@ export function downloadText(filename, text) {
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+// File name for a ride, e.g. smoothroute_2026-11-05-10-30-00.csv (UTC time)
+export function csvFilename(startedAt) {
+  const stamp = new Date(startedAt).toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  return `smoothroute_${stamp}.csv`
+}
