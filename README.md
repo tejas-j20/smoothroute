@@ -6,6 +6,7 @@ No app install, no special hardware, no video.
 ## Status
 - Stage 1: recorder page (motion + GPS logging, manual bump marks, CSV export)
 - Stage 2: session map, autosave and saved rides, unit tests, analysis notebook
+- Stage 3: automatic bump detection in the browser with editable settings, compared with hand marks
 
 ## Folders
 - `frontend/`  React + Vite web app (the recorder lives here)
@@ -26,6 +27,11 @@ cloudflared tunnel --url http://localhost:5173
 ```
 Saved rides belong to the link they were recorded on. A new tunnel link starts
 with an empty list, so download your CSV before closing the tunnel.
+
+## Automatic detection
+On the Ready screen, choose the detection settings (threshold, minimum speed, pause, plain or
+speed-normalised). While recording, the app finds bumps live. After the ride, the result screen
+compares them with the bumps you marked by hand (marks found, false alarms, missed).
 
 ## Run the tests
 ```bash
