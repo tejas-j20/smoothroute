@@ -36,3 +36,10 @@ button:disabled { opacity: .5; cursor: default; }
 .small { width: auto; margin-top: 0; padding: 8px 12px; font-size: .85rem; background: #eef5fb; color: #1585c7; font-weight: 700; }
 .danger { background: #fdeaea; color: #c62828; }
 .badge { margin-left: 8px; font-size: .7rem; background: #fff4e5; color: #b26a00; padding: 2px 6px; border-radius: 6px; }
+
+/* ---- Stage 3: detection ---- */
+.settings { border-top: 1px solid #e3e8ee; margin-top: 14px; padding-top: 6px; }
+.presets { display: flex; gap: 8px; }
+.field-hint { display: block; font-weight: 400; color: #666; margin-top: 3px; }
+.detected { background: #eaf6ea; border-left: 4px solid #2e7d32; padding: 8px 10px; border-radius: 6px; margin: 10px 0; }
+.legend i.ring { background: transparent; border: 3px solid; box-sizing: border-box; }

@@ -3,7 +3,7 @@
 //   pandas.read_csv("file.csv", comment="#")
 const COLUMNS = [
   'time_ms', 'ax', 'ay', 'az', 'strength', 'gravity_included',
-  'lat', 'lng', 'gps_accuracy_m', 'speed_mps', 'speed_source', 'event',
+  'lat', 'lng', 'gps_accuracy_m', 'speed_mps', 'speed_source', 'event', 'detect_value',
 ]
 
 const num = (v, digits) =>
@@ -12,7 +12,16 @@ const num = (v, digits) =>
 // keep free-text notes from breaking the CSV
 const clean = (s) => String(s ?? '').replace(/[\r\n,]+/g, ' ').trim()
 
-export function toCsv(meta, samples, marks) {
+// One line describing the detector settings that were used for the ride.
+function detectionNote(settings) {
+  if (!settings) return '# detection: not recorded'
+  const threshold = settings.mode === 'normalised' ? settings.thresholdNorm : settings.threshold
+  return `# detection: mode=${settings.mode} threshold=${threshold} min_speed_mps=${settings.minSpeed} pause_s=${settings.pause}`
+}
+
+// detections = the bumps the app found automatically (rows get event "auto_<severity>"
+// and the detector's value in the last column).
+export function toCsv(meta, samples, marks, detections = []) {
   const header = [
     '# SmoothRoute recording',
     `# phone: ${clean(meta.phone)}`,
@@ -21,6 +30,7 @@ export function toCsv(meta, samples, marks) {
     `# road: ${clean(meta.road)}`,
     `# started: ${new Date(meta.startedAt).toISOString()}`,
     `# ended: ${new Date(meta.endedAt).toISOString()}`,
+    detectionNote(meta.settings),
     COLUMNS.join(','),
   ]
 
@@ -30,7 +40,7 @@ export function toCsv(meta, samples, marks) {
       s.t, num(s.ax, 4), num(s.ay, 4), num(s.az, 4), num(s.strength, 4),
       s.gravity ? 1 : 0,
       num(s.lat, 7), num(s.lng, 7), num(s.acc, 1), num(s.speed, 3),
-      s.speedSource ?? '', '',
+      s.speedSource ?? '', '', '',
     ].join(','),
   }))
 
@@ -40,11 +50,21 @@ export function toCsv(meta, samples, marks) {
     line: [
       m.t, '', '', '', '', '',
       num(m.lat, 7), num(m.lng, 7), num(m.acc, 1), num(m.speed, 3),
-      m.speedSource ?? '', clean(m.type),
+      m.speedSource ?? '', clean(m.type), '',
     ].join(','),
   }))
 
-  const all = [...sampleRows, ...markRows].sort((a, b) => a.t - b.t)
+  // an automatic detection is also its own row: sensor columns empty
+  const detectionRows = detections.map((d) => ({
+    t: d.t,
+    line: [
+      d.t, '', '', '', '', '',
+      num(d.lat, 7), num(d.lng, 7), num(d.acc, 1), num(d.speed, 3),
+      '', `auto_${d.severity}`, num(d.value, 4),
+    ].join(','),
+  }))
+
+  const all = [...sampleRows, ...markRows, ...detectionRows].sort((a, b) => a.t - b.t)
   return header.concat(all.map((r) => r.line)).join('\n')
 }
 

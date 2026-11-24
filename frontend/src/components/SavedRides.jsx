@@ -31,7 +31,7 @@ export default function SavedRides({ refreshKey, onOpen, onDownload, onDelete })
             {r.status !== 'finished' && <span className="badge">interrupted</span>}
             <br />
             <small>
-              {r.sampleCount} readings, {(r.marks || []).length} marks
+              {r.sampleCount} readings, {(r.marks || []).length} marks, {(r.detections || []).length} detected
               {r.meta && r.meta.vehicle ? `, ${r.meta.vehicle}` : ''}
             </small>
           </div>
