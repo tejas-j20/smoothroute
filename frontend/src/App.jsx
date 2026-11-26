@@ -5,11 +5,17 @@ import LiveReadout from './components/LiveReadout'
 import MarkPanel from './components/MarkPanel'
 import RideResult from './components/RideResult'
 import SavedRides from './components/SavedRides'
+import DetectionSettings from './components/DetectionSettings'
+import ServerSettings from './components/ServerSettings'
+import MapPage from './components/MapPage'
 import { requestMotionPermission, useMotion } from './hooks/useMotion'
 import { requestLocationPermission, useGeolocation } from './hooks/useGeolocation'
 import { useWakeLock } from './hooks/useWakeLock'
 import { toCsv, downloadText, csvFilename } from './utils/csv'
-import { saveSession, saveChunk, loadSession, deleteSession } from './utils/storage'
+import { saveSession, saveChunk, loadSession, deleteSession, updateSession } from './utils/storage'
+import { getDeviceId, loadApiBase, saveApiBase } from './utils/serverSettings'
+import { createDetector } from './utils/detector'
+import { cleanSettings, loadSettings, saveSettings } from './utils/settings'
 
 const AUTOSAVE_MS = 5000
 
@@ -24,11 +30,19 @@ function buildResult(session, samples) {
     endedAt: session.endedAt ?? lastTime,
     samples,
     marks: session.marks || [],
+    detections: session.detections || [],
+    settings: session.settings || null,
+    uploaded: session.uploaded || null,
   }
 }
 
 function downloadResult(r) {
-  const csv = toCsv({ ...r.meta, startedAt: r.startedAt, endedAt: r.endedAt }, r.samples, r.marks)
+  const csv = toCsv(
+    { ...r.meta, settings: r.settings, startedAt: r.startedAt, endedAt: r.endedAt },
+    r.samples,
+    r.marks,
+    r.detections,
+  )
   downloadText(csvFilename(r.startedAt), csv)
 }
 
@@ -44,11 +58,18 @@ export default function App() {
   const [result, setResult] = useState(null)
   const [savedKey, setSavedKey] = useState(0) // bump this to reload the saved-rides list
   const [storageOk, setStorageOk] = useState(true)
+  const [settings, setSettings] = useState(() => loadSettings()) // detection settings
+  const [apiBase, setApiBase] = useState(() => loadApiBase()) // backend address
+  const [deviceId] = useState(() => getDeviceId()) // anonymous id of this phone
+  const [screen, setScreen] = useState('record') // 'record' or 'map'
 
   // Data lives in refs: the sensor fires dozens of times a second and storing
   // it in React state would make the page lag.
   const samples = useRef([])
   const marks = useRef([])
+  const detections = useRef([]) // bumps found automatically
+  const detectorRef = useRef(null)
+  const settingsRef = useRef(settings) // settings used for the ride being recorded
   const recordingRef = useRef(false)
   const latestMotion = useRef(null)
   const motionCount = useRef(0)
@@ -75,7 +96,13 @@ export default function App() {
       }
       latestMotion.current = row
       motionCount.current += 1
-      if (recordingRef.current) samples.current.push(row)
+      if (recordingRef.current) {
+        samples.current.push(row)
+        if (detectorRef.current) {
+          const found = detectorRef.current.push(row)
+          if (found.length > 0) detections.current.push(...found)
+        }
+      }
     },
     [geo.latest],
   )
@@ -91,6 +118,8 @@ export default function App() {
     const job = {
       rows: samples.current,
       marks: marks.current.slice(),
+      detections: detections.current.slice(),
+      settings: settingsRef.current,
       meta: metaRef.current,
       startedAt: startedAt.current,
     }
@@ -109,6 +138,8 @@ export default function App() {
           status,
           meta: job.meta,
           marks: job.marks,
+          detections: job.detections,
+          settings: job.settings,
           sampleCount: sess.savedCount,
         })
         setStorageOk(true)
@@ -160,6 +191,10 @@ export default function App() {
         speed: g ? g.speed : null,
         acc: g ? g.acc : null,
         elapsed: recordingRef.current ? (now - startedAt.current) / 1000 : 0,
+        detected: detections.current.length,
+        lastSeverity: detections.current.length
+          ? detections.current[detections.current.length - 1].severity
+          : null,
       })
     }, 500)
     return () => clearInterval(id)
@@ -181,9 +216,12 @@ export default function App() {
     const id = Date.now()
     samples.current = []
     marks.current = []
+    detections.current = []
     motionCount.current = 0
     startedAt.current = id
     metaRef.current = meta
+    settingsRef.current = settings
+    detectorRef.current = createDetector(settings)
     sessionRef.current = { id, savedCount: 0, chunkSeq: 0 }
     recordingRef.current = true
     setMarksCount(0)
@@ -198,6 +236,10 @@ export default function App() {
   const stopRecording = () => {
     recordingRef.current = false
     const endedAt = Date.now()
+    if (detectorRef.current) {
+      detections.current.push(...detectorRef.current.flush()) // close a bump still being measured
+      detectorRef.current = null
+    }
     setResult(
       buildResult(
         {
@@ -207,6 +249,8 @@ export default function App() {
           startedAt: startedAt.current,
           endedAt,
           marks: marks.current.slice(),
+          detections: detections.current.slice(),
+          settings: settingsRef.current,
         },
         samples.current,
       ),
@@ -234,6 +278,30 @@ export default function App() {
   const undoMark = () => {
     marks.current.pop()
     setMarksCount(marks.current.length)
+  }
+
+  const updateApiBase = (base) => {
+    setApiBase(base)
+    saveApiBase(base)
+  }
+
+  // Remember that a ride was uploaded (so the saved-rides list can show it).
+  const handleUploaded = async (info) => {
+    setResult((r) => (r ? { ...r, uploaded: info } : r))
+    if (result && result.id != null) {
+      try {
+        await updateSession(result.id, { uploaded: info })
+        setSavedKey((k) => k + 1)
+      } catch {
+        // the upload itself worked; only the badge could not be saved
+      }
+    }
+  }
+
+  const updateSettings = (next) => {
+    const clean = cleanSettings(next)
+    setSettings(clean)
+    saveSettings(clean)
   }
 
   // ----- saved rides (autosaved on this phone) -----
@@ -282,10 +350,22 @@ export default function App() {
     />
   )
 
+  if (screen === 'map') {
+    return (
+      <main>
+        <MapPage apiBase={apiBase} onBack={() => setScreen('record')} onApiBaseChange={updateApiBase} />
+      </main>
+    )
+  }
+
   if (phase === 'permission') {
     return (
       <main>
         <PermissionScreen perm={perm} busy={busy} onAllow={handleAllow} />
+        <div className="card">
+          <button className="primary" onClick={() => setScreen('map')}>View the road roughness map</button>
+        </div>
+        <ServerSettings apiBase={apiBase} onChange={updateApiBase} />
         {saved}
       </main>
     )
@@ -296,6 +376,9 @@ export default function App() {
       <main>
         <RideResult
           result={result}
+          apiBase={apiBase}
+          deviceId={deviceId}
+          onUploaded={handleUploaded}
           onDownload={() => downloadResult(result)}
           onClose={closeResult}
         />
@@ -324,6 +407,8 @@ export default function App() {
               </p>
             )}
 
+            <DetectionSettings settings={settings} onChange={updateSettings} />
+
             <label>Phone model
               <input value={meta.phone} onChange={set('phone')} placeholder="e.g. Redmi Note 11" />
             </label>
@@ -344,6 +429,10 @@ export default function App() {
 
             <button className="primary" onClick={startRecording}>Start recording</button>
           </div>
+          <div className="card">
+            <button className="primary" onClick={() => setScreen('map')}>View the road roughness map</button>
+          </div>
+          <ServerSettings apiBase={apiBase} onChange={updateApiBase} />
           {saved}
         </>
       )}
@@ -352,6 +441,10 @@ export default function App() {
         <div className="card">
           <h1>Recording</h1>
           <LiveReadout live={live} marksCount={marksCount} recording />
+          <p className="detected">
+            Detected automatically: <b>{live ? live.detected : 0}</b>
+            {live && live.lastSeverity ? ` (last one: ${live.lastSeverity})` : ''}
+          </p>
           {!storageOk && (
             <p className="warn">
               Autosave is not working in this browser. Download the CSV before you leave the page.

@@ -23,8 +23,9 @@ describe('toCsv', () => {
   it('starts with the session notes and the column header', () => {
     expect(lines[0]).toBe('# SmoothRoute recording')
     expect(lines).toContain('# vehicle: car')
-    expect(lines[7]).toBe(
-      'time_ms,ax,ay,az,strength,gravity_included,lat,lng,gps_accuracy_m,speed_mps,speed_source,event',
+    expect(lines[7]).toBe('# detection: not recorded')
+    expect(lines[8]).toBe(
+      'time_ms,ax,ay,az,strength,gravity_included,lat,lng,gps_accuracy_m,speed_mps,speed_source,event,detect_value',
     )
   })
 
@@ -34,7 +35,7 @@ describe('toCsv', () => {
   })
 
   it('puts the mark between the readings, ordered by time', () => {
-    const rows = lines.slice(8)
+    const rows = lines.slice(9)
     expect(rows).toHaveLength(3)
     expect(rows[0].startsWith('100,')).toBe(true)
     expect(rows[1].startsWith('200,')).toBe(true)
@@ -42,21 +43,51 @@ describe('toCsv', () => {
   })
 
   it('writes the event name only on mark rows, with empty sensor columns', () => {
-    const rows = lines.slice(8)
+    const rows = lines.slice(9)
     expect(rows[0].endsWith(',')).toBe(true) // reading: empty event
     expect(rows[1].startsWith('200,,,,,,')).toBe(true)
-    expect(rows[1].endsWith(',pothole')).toBe(true)
+    expect(rows[1].endsWith(',pothole,')).toBe(true)
   })
 
   it('leaves missing GPS values empty', () => {
     const csv = toCsv(meta, [sample(100, { lat: null, lng: null, acc: null, speed: null })], [])
-    const row = csv.split('\n')[8]
-    expect(row).toBe('100,1.0000,2.0000,3.0000,3.7417,0,,,,,gps,')
+    const row = csv.split('\n')[9]
+    expect(row).toBe('100,1.0000,2.0000,3.0000,3.7417,0,,,,,gps,,')
   })
 
   it('marks whether gravity is included', () => {
     const csv = toCsv(meta, [sample(100, { gravity: true })], [])
-    expect(csv.split('\n')[8].split(',')[5]).toBe('1')
+    expect(csv.split('\n')[9].split(',')[5]).toBe('1')
+  })
+})
+
+describe('toCsv with automatic detections', () => {
+  const det = { t: 150, value: 4.5, lat: 12.9, lng: 77.5, acc: 8, speed: 5.5, severity: 'moderate' }
+  const csv = toCsv(
+    { ...meta, settings: { mode: 'plain', threshold: 3, thresholdNorm: 0.5, minSpeed: 3, pause: 1 } },
+    [sample(100), sample(300)],
+    [],
+    [det],
+  )
+  const lines = csv.split('\n')
+
+  it('writes the settings that were used', () => {
+    expect(lines[7]).toBe('# detection: mode=plain threshold=3 min_speed_mps=3 pause_s=1')
+  })
+
+  it('adds a row per detection with event auto_<severity> and the value', () => {
+    const row = lines[10]
+    expect(row.startsWith('150,,,,,,')).toBe(true)
+    expect(row.endsWith(',auto_moderate,4.5000')).toBe(true)
+  })
+
+  it('shows the normalised threshold when that mode was used', () => {
+    const text = toCsv(
+      { ...meta, settings: { mode: 'normalised', threshold: 3, thresholdNorm: 0.5, minSpeed: 3, pause: 1 } },
+      [],
+      [],
+    )
+    expect(text.split('\n')[7]).toBe('# detection: mode=normalised threshold=0.5 min_speed_mps=3 pause_s=1')
   })
 })
 
