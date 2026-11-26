@@ -29,6 +29,7 @@ export default function SavedRides({ refreshKey, onOpen, onDownload, onDelete })
           <div>
             <b>{new Date(r.startedAt).toLocaleString()}</b>
             {r.status !== 'finished' && <span className="badge">interrupted</span>}
+            {r.uploaded && <span className="badge good">uploaded</span>}
             <br />
             <small>
               {r.sampleCount} readings, {(r.marks || []).length} marks, {(r.detections || []).length} detected

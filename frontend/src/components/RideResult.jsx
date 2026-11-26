@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import SessionMap from './SessionMap'
+import UploadPanel from './UploadPanel'
 import { MARK_TYPES, SEVERITY_COLORS } from '../utils/marks'
 import { routePoints } from '../utils/route'
 import { matchByTime, matchByDistance } from '../utils/matching'
@@ -16,7 +17,7 @@ function describeSettings(s) {
 }
 
 // Shown after a ride finishes, and when you open a saved ride.
-export default function RideResult({ result, onDownload, onClose }) {
+export default function RideResult({ result, apiBase, deviceId, onUploaded, onDownload, onClose }) {
   const { samples, marks, detections, startedAt, endedAt } = result
   const seconds = Math.max(0, (endedAt - startedAt) / 1000)
   const perSecond = seconds > 0 ? Math.round(samples.length / seconds) : 0
@@ -123,6 +124,8 @@ export default function RideResult({ result, onDownload, onClose }) {
           </p>
         )
       )}
+
+      <UploadPanel result={result} apiBase={apiBase} deviceId={deviceId} onUploaded={onUploaded} />
 
       {hasPosition ? (
         <>

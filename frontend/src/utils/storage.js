@@ -86,3 +86,13 @@ export async function deleteSession(id) {
   tx.objectStore('chunks').delete(chunkRange(id))
   await finished(tx)
 }
+
+// Changes some fields of a saved ride record (for example to remember that it was uploaded).
+export async function updateSession(id, patch) {
+  const db = await openDb()
+  const tx = db.transaction('sessions', 'readwrite')
+  const store = tx.objectStore('sessions')
+  const current = await wait(store.get(id))
+  if (current) store.put({ ...current, ...patch })
+  await finished(tx)
+}

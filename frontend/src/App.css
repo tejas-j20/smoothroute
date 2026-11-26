@@ -43,3 +43,14 @@ button:disabled { opacity: .5; cursor: default; }
 .field-hint { display: block; font-weight: 400; color: #666; margin-top: 3px; }
 .detected { background: #eaf6ea; border-left: 4px solid #2e7d32; padding: 8px 10px; border-radius: 6px; margin: 10px 0; }
 .legend i.ring { background: transparent; border: 3px solid; box-sizing: border-box; }
+
+/* ---- Stage 5: upload and public map ---- */
+.upload { border-top: 1px solid #e3e8ee; margin-top: 14px; padding-top: 6px; }
+.success { background: #eaf6ea; border-left: 4px solid #2e7d32; padding: 8px 10px; border-radius: 6px; font-size: .92rem; }
+.badge.good { background: #eaf6ea; color: #2e7d32; }
+.map.tall { height: 58vh; min-height: 320px; }
+.filters { display: grid; gap: 4px; margin-bottom: 8px; }
+.filters label.inline { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.filters label.inline input { width: auto; margin: 0; }
+details.server summary { cursor: pointer; font-weight: 700; color: #1585c7; }
+details.server input { margin-top: 8px; }

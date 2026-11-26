@@ -6,11 +6,14 @@ import MarkPanel from './components/MarkPanel'
 import RideResult from './components/RideResult'
 import SavedRides from './components/SavedRides'
 import DetectionSettings from './components/DetectionSettings'
+import ServerSettings from './components/ServerSettings'
+import MapPage from './components/MapPage'
 import { requestMotionPermission, useMotion } from './hooks/useMotion'
 import { requestLocationPermission, useGeolocation } from './hooks/useGeolocation'
 import { useWakeLock } from './hooks/useWakeLock'
 import { toCsv, downloadText, csvFilename } from './utils/csv'
-import { saveSession, saveChunk, loadSession, deleteSession } from './utils/storage'
+import { saveSession, saveChunk, loadSession, deleteSession, updateSession } from './utils/storage'
+import { getDeviceId, loadApiBase, saveApiBase } from './utils/serverSettings'
 import { createDetector } from './utils/detector'
 import { cleanSettings, loadSettings, saveSettings } from './utils/settings'
 
@@ -29,6 +32,7 @@ function buildResult(session, samples) {
     marks: session.marks || [],
     detections: session.detections || [],
     settings: session.settings || null,
+    uploaded: session.uploaded || null,
   }
 }
 
@@ -55,6 +59,9 @@ export default function App() {
   const [savedKey, setSavedKey] = useState(0) // bump this to reload the saved-rides list
   const [storageOk, setStorageOk] = useState(true)
   const [settings, setSettings] = useState(() => loadSettings()) // detection settings
+  const [apiBase, setApiBase] = useState(() => loadApiBase()) // backend address
+  const [deviceId] = useState(() => getDeviceId()) // anonymous id of this phone
+  const [screen, setScreen] = useState('record') // 'record' or 'map'
 
   // Data lives in refs: the sensor fires dozens of times a second and storing
   // it in React state would make the page lag.
@@ -273,6 +280,24 @@ export default function App() {
     setMarksCount(marks.current.length)
   }
 
+  const updateApiBase = (base) => {
+    setApiBase(base)
+    saveApiBase(base)
+  }
+
+  // Remember that a ride was uploaded (so the saved-rides list can show it).
+  const handleUploaded = async (info) => {
+    setResult((r) => (r ? { ...r, uploaded: info } : r))
+    if (result && result.id != null) {
+      try {
+        await updateSession(result.id, { uploaded: info })
+        setSavedKey((k) => k + 1)
+      } catch {
+        // the upload itself worked; only the badge could not be saved
+      }
+    }
+  }
+
   const updateSettings = (next) => {
     const clean = cleanSettings(next)
     setSettings(clean)
@@ -325,10 +350,22 @@ export default function App() {
     />
   )
 
+  if (screen === 'map') {
+    return (
+      <main>
+        <MapPage apiBase={apiBase} onBack={() => setScreen('record')} onApiBaseChange={updateApiBase} />
+      </main>
+    )
+  }
+
   if (phase === 'permission') {
     return (
       <main>
         <PermissionScreen perm={perm} busy={busy} onAllow={handleAllow} />
+        <div className="card">
+          <button className="primary" onClick={() => setScreen('map')}>View the road roughness map</button>
+        </div>
+        <ServerSettings apiBase={apiBase} onChange={updateApiBase} />
         {saved}
       </main>
     )
@@ -339,6 +376,9 @@ export default function App() {
       <main>
         <RideResult
           result={result}
+          apiBase={apiBase}
+          deviceId={deviceId}
+          onUploaded={handleUploaded}
           onDownload={() => downloadResult(result)}
           onClose={closeResult}
         />
@@ -389,6 +429,10 @@ export default function App() {
 
             <button className="primary" onClick={startRecording}>Start recording</button>
           </div>
+          <div className="card">
+            <button className="primary" onClick={() => setScreen('map')}>View the road roughness map</button>
+          </div>
+          <ServerSettings apiBase={apiBase} onChange={updateApiBase} />
           {saved}
         </>
       )}

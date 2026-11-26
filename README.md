@@ -7,6 +7,8 @@ No app install, no special hardware, no video.
 - Stage 1: recorder page (motion + GPS logging, manual bump marks, CSV export)
 - Stage 2: session map, autosave and saved rides, unit tests, analysis notebook
 - Stage 3: automatic bump detection in the browser with editable settings, compared with hand marks
+- Stage 4: Spring Boot backend (severity scoring, clustering, REST API)
+- Stage 5: upload detected bumps from the app and a public road roughness map
 
 ## Folders
 - `frontend/`  React + Vite web app (the recorder lives here)
@@ -32,6 +34,16 @@ with an empty list, so download your CSV before closing the tunnel.
 On the Ready screen, choose the detection settings (threshold, minimum speed, pause, plain or
 speed-normalised). While recording, the app finds bumps live. After the ride, the result screen
 compares them with the bumps you marked by hand (marks found, false alarms, missed).
+
+## Upload and the public map
+1. Start the backend (see `backend/README.md`) and give it an https:// address, for example
+   `cloudflared tunnel --url http://localhost:8080`.
+2. In the app, open "Server address", paste that https:// address and press "Test connection".
+3. After a ride, press "Upload to the server" on the result screen.
+4. Press "View the road roughness map" to see all spots, coloured by severity.
+
+The address can also be built into the site with the `VITE_API_URL` environment variable
+(see `frontend/.env.example`).
 
 ## Run the tests
 ```bash
