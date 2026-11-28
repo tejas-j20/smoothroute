@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import SpotsMap from './SpotsMap'
 import ServerSettings from './ServerSettings'
+import { Alert } from './ui'
 import { fetchClusters } from '../utils/api'
 import { SEVERITY_COLORS } from '../utils/marks'
 
-// The public map screen: all rough spots reported by everyone, from the backend.
-export default function MapPage({ apiBase, onBack, onApiBaseChange }) {
+// Every rough spot reported by everyone, from the backend.
+export default function MapPage({ apiBase, onApiBaseChange }) {
   const [filters, setFilters] = useState({ confirmedOnly: false, minSeverity: '' })
   const [refreshKey, setRefreshKey] = useState(0)
   const [state, setState] = useState({ status: 'loading', spots: [], error: '', at: null })
@@ -32,24 +33,46 @@ export default function MapPage({ apiBase, onBack, onApiBaseChange }) {
   const confirmed = state.spots.filter((s) => s.confirmed).length
 
   return (
-    <>
-      <div className="card">
-        <h1>Road roughness map</h1>
+    <main className="page">
+      <section>
+        <h1>Roughness map</h1>
 
         {!apiBase ? (
-          <p className="warn">Set the server address below to load the map.</p>
+          <Alert>Set the server address below to load the map.</Alert>
         ) : (
           <>
-            <div className="filters">
-              <label className="inline">
+            {state.status === 'error' && <Alert bad>{state.error}</Alert>}
+            {state.status === 'loading' && <p>Loading. A sleeping free server can take a minute.</p>}
+            {state.status === 'ok' && (
+              <p>
+                {state.spots.length} {state.spots.length === 1 ? 'spot' : 'spots'}, {confirmed} confirmed.
+                Updated {new Date(state.at).toLocaleTimeString()}.
+                {state.spots.length === 0 && ' Nothing here yet. Upload a ride first.'}
+              </p>
+            )}
+
+            <SpotsMap spots={state.spots} />
+
+            <div className="legend">
+              {Object.entries(SEVERITY_COLORS).map(([k, c]) => (
+                <span key={k} style={{ '--c': c }}>{k} ({count(k)})</span>
+              ))}
+            </div>
+            <p className="muted small">
+              A bigger circle means more reports. A solid circle is confirmed by 2 or more reports, a
+              light one was reported once. Tap a circle for details. The map needs internet.
+            </p>
+
+            <div className="fields">
+              <label className="check">
                 <input
                   type="checkbox"
                   checked={filters.confirmedOnly}
                   onChange={(e) => setFilters({ ...filters, confirmedOnly: e.target.checked })}
                 />
-                Confirmed only (2 or more reports)
+                Confirmed spots only
               </label>
-              <label>Show
+              <label className="field">Show
                 <select
                   value={filters.minSeverity}
                   onChange={(e) => setFilters({ ...filters, minSeverity: e.target.value })}
@@ -59,42 +82,15 @@ export default function MapPage({ apiBase, onBack, onApiBaseChange }) {
                   <option value="severe">Severe only</option>
                 </select>
               </label>
-              <button className="small" onClick={() => setRefreshKey((k) => k + 1)}>Refresh</button>
             </div>
-
-            {state.status === 'error' && <p className="warn">{state.error}</p>}
-            {state.status === 'loading' && (
-              <p className="hint">Loading (a sleeping free server can take a minute)...</p>
-            )}
-            {state.status === 'ok' && (
-              <p className="hint">
-                {state.spots.length} {state.spots.length === 1 ? 'spot' : 'spots'} ({confirmed} confirmed).
-                Updated {new Date(state.at).toLocaleTimeString()}.
-                {state.spots.length === 0 && ' Nothing here yet: upload a ride first.'}
-              </p>
-            )}
-
-            <SpotsMap spots={state.spots} />
-
-            <div className="legend">
-              {Object.entries(SEVERITY_COLORS).map(([k, c]) => (
-                <span key={k}>
-                  <i style={{ background: c }} />
-                  {k} ({count(k)})
-                </span>
-              ))}
+            <div className="inline-actions">
+              <button className="textbtn" onClick={() => setRefreshKey((k) => k + 1)}>Refresh the map</button>
             </div>
-            <p className="hint">
-              Bigger circle = more reports. Solid = confirmed by 2 or more reports, light = reported
-              once. Tap a circle for details. The map needs internet.
-            </p>
           </>
         )}
-
-        <button className="link" onClick={onBack}>Back to the recorder</button>
-      </div>
+      </section>
 
       <ServerSettings apiBase={apiBase} onChange={onApiBaseChange} />
-    </>
+    </main>
   )
 }

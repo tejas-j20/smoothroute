@@ -34,7 +34,7 @@ export default function SessionMap({ samples, marks, detections = [] }) {
         const ring = L.circleMarker([d.lat, d.lng], {
           radius: 15,
           color: SEVERITY_COLORS[d.severity] || '#333333',
-          weight: 4,
+          weight: 5,
           fill: false,
         }).addTo(map)
         ring.bindPopup(

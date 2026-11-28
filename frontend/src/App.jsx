@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import PermissionScreen from './components/PermissionScreen'
-import LiveReadout from './components/LiveReadout'
-import MarkPanel from './components/MarkPanel'
+import ReadyScreen from './components/ReadyScreen'
+import RecordingScreen from './components/RecordingScreen'
 import RideResult from './components/RideResult'
 import SavedRides from './components/SavedRides'
-import DetectionSettings from './components/DetectionSettings'
 import ServerSettings from './components/ServerSettings'
 import MapPage from './components/MapPage'
 import { requestMotionPermission, useMotion } from './hooks/useMotion'
@@ -16,8 +15,16 @@ import { saveSession, saveChunk, loadSession, deleteSession, updateSession } fro
 import { getDeviceId, loadApiBase, saveApiBase } from './utils/serverSettings'
 import { createDetector } from './utils/detector'
 import { cleanSettings, loadSettings, saveSettings } from './utils/settings'
+import { createTrace, pushTrace } from './utils/trace'
 
 const AUTOSAVE_MS = 5000
+
+// How many bumps of each type were marked, for the counters on the mark buttons.
+function countByType(list) {
+  const out = {}
+  for (const m of list) out[m.type] = (out[m.type] || 0) + 1
+  return out
+}
 
 // Turns a ride (just finished, or loaded from storage) into what the result screen shows.
 function buildResult(session, samples) {
@@ -55,6 +62,7 @@ export default function App() {
   const [meta, setMeta] = useState({ phone: '', mount: 'holder', vehicle: '', road: '' })
   const [live, setLive] = useState(null)
   const [marksCount, setMarksCount] = useState(0)
+  const [markCounts, setMarkCounts] = useState({})
   const [result, setResult] = useState(null)
   const [savedKey, setSavedKey] = useState(0) // bump this to reload the saved-rides list
   const [storageOk, setStorageOk] = useState(true)
@@ -62,6 +70,7 @@ export default function App() {
   const [apiBase, setApiBase] = useState(() => loadApiBase()) // backend address
   const [deviceId] = useState(() => getDeviceId()) // anonymous id of this phone
   const [screen, setScreen] = useState('record') // 'record' or 'map'
+  const trace = useMemo(() => createTrace(400), []) // history for the live trace
 
   // Data lives in refs: the sensor fires dozens of times a second and storing
   // it in React state would make the page lag.
@@ -96,6 +105,7 @@ export default function App() {
       }
       latestMotion.current = row
       motionCount.current += 1
+      pushTrace(trace, s.strength, s.t)
       if (recordingRef.current) {
         samples.current.push(row)
         if (detectorRef.current) {
@@ -104,7 +114,7 @@ export default function App() {
         }
       }
     },
-    [geo.latest],
+    [geo.latest, trace],
   )
 
   useMotion(sensorsOn, onSample)
@@ -225,6 +235,7 @@ export default function App() {
     sessionRef.current = { id, savedCount: 0, chunkSeq: 0 }
     recordingRef.current = true
     setMarksCount(0)
+    setMarkCounts({})
     setPhase('recording')
     persist('recording')
     // Ask the browser not to delete saved rides when storage runs low.
@@ -272,12 +283,14 @@ export default function App() {
       speedSource: g ? g.speedSource : '',
     })
     setMarksCount(marks.current.length)
+    setMarkCounts(countByType(marks.current))
     if (navigator.vibrate) navigator.vibrate(60)
   }
 
   const undoMark = () => {
     marks.current.pop()
     setMarksCount(marks.current.length)
+    setMarkCounts(countByType(marks.current))
   }
 
   const updateApiBase = (base) => {
@@ -350,110 +363,83 @@ export default function App() {
     />
   )
 
-  if (screen === 'map') {
-    return (
-      <main>
-        <MapPage apiBase={apiBase} onBack={() => setScreen('record')} onApiBaseChange={updateApiBase} />
-      </main>
-    )
-  }
+  const noMotion = sensorsOn && live && live.strength == null
+  // The dashed line on the live trace: the jolt that counts as a bump at the current speed.
+  const traceThreshold =
+    settings.mode === 'normalised'
+      ? settings.thresholdNorm * Math.max((live && live.speed) || 0, settings.minSpeed || 0.1)
+      : settings.threshold
+  const dark = screen === 'record' && phase === 'recording'
 
-  if (phase === 'permission') {
-    return (
-      <main>
-        <PermissionScreen perm={perm} busy={busy} onAllow={handleAllow} />
-        <div className="card">
-          <button className="primary" onClick={() => setScreen('map')}>View the road roughness map</button>
-        </div>
+  let body
+  if (screen === 'map') {
+    body = <MapPage apiBase={apiBase} onApiBaseChange={updateApiBase} />
+  } else if (phase === 'permission') {
+    body = (
+      <PermissionScreen perm={perm} busy={busy} onAllow={handleAllow}>
         <ServerSettings apiBase={apiBase} onChange={updateApiBase} />
         {saved}
-      </main>
+      </PermissionScreen>
+    )
+  } else if (phase === 'result' && result) {
+    body = (
+      <RideResult
+        result={result}
+        apiBase={apiBase}
+        deviceId={deviceId}
+        onUploaded={handleUploaded}
+        onDownload={() => downloadResult(result)}
+        onClose={closeResult}
+      />
+    )
+  } else if (phase === 'recording') {
+    body = (
+      <RecordingScreen
+        live={live}
+        trace={trace}
+        traceThreshold={traceThreshold}
+        marksCount={marksCount}
+        markCounts={markCounts}
+        storageOk={storageOk}
+        onMark={addMark}
+        onUndo={undoMark}
+        onStop={stopRecording}
+      />
+    )
+  } else {
+    body = (
+      <ReadyScreen
+        live={live}
+        trace={trace}
+        traceThreshold={traceThreshold}
+        noMotion={noMotion}
+        meta={meta}
+        onMeta={setMeta}
+        settings={settings}
+        onSettings={updateSettings}
+        apiBase={apiBase}
+        onApiBase={updateApiBase}
+        saved={saved}
+        onStart={startRecording}
+      />
     )
   }
-
-  if (phase === 'result' && result) {
-    return (
-      <main>
-        <RideResult
-          result={result}
-          apiBase={apiBase}
-          deviceId={deviceId}
-          onUploaded={handleUploaded}
-          onDownload={() => downloadResult(result)}
-          onClose={closeResult}
-        />
-      </main>
-    )
-  }
-
-  const noMotion = sensorsOn && live && live.strength == null
-  const set = (k) => (e) => setMeta({ ...meta, [k]: e.target.value })
 
   return (
-    <main>
-      {phase === 'ready' && (
-        <>
-          <div className="card">
-            <h1>Get ready</h1>
-            <p className="hint">
-              Sensor check: move the phone and watch &quot;Shake strength&quot; change. Wait
-              until GPS accuracy is low (about 20 m or better) before you start.
-            </p>
-            <LiveReadout live={live} marksCount={0} recording={false} />
-            {noMotion && (
-              <p className="warn">
-                No motion data yet. Allow &quot;Motion sensors&quot; for this site in your
-                browser settings, or try another browser.
-              </p>
-            )}
-
-            <DetectionSettings settings={settings} onChange={updateSettings} />
-
-            <label>Phone model
-              <input value={meta.phone} onChange={set('phone')} placeholder="e.g. Redmi Note 11" />
-            </label>
-            <label>How is the phone placed?
-              <select value={meta.mount} onChange={set('mount')}>
-                <option value="holder">Fixed in a holder</option>
-                <option value="mat">Flat on a non-slip mat</option>
-                <option value="hand">Held in hand</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <label>Vehicle
-              <input value={meta.vehicle} onChange={set('vehicle')} placeholder="e.g. scooter, car, bicycle" />
-            </label>
-            <label>Road / route
-              <input value={meta.road} onChange={set('road')} placeholder="e.g. campus main road" />
-            </label>
-
-            <button className="primary" onClick={startRecording}>Start recording</button>
-          </div>
-          <div className="card">
-            <button className="primary" onClick={() => setScreen('map')}>View the road roughness map</button>
-          </div>
-          <ServerSettings apiBase={apiBase} onChange={updateApiBase} />
-          {saved}
-        </>
-      )}
-
-      {phase === 'recording' && (
-        <div className="card">
-          <h1>Recording</h1>
-          <LiveReadout live={live} marksCount={marksCount} recording />
-          <p className="detected">
-            Detected automatically: <b>{live ? live.detected : 0}</b>
-            {live && live.lastSeverity ? ` (last one: ${live.lastSeverity})` : ''}
-          </p>
-          {!storageOk && (
-            <p className="warn">
-              Autosave is not working in this browser. Download the CSV before you leave the page.
-            </p>
-          )}
-          <MarkPanel onMark={addMark} onUndo={undoMark} marksCount={marksCount} />
-          <button className="stop" onClick={stopRecording}>Stop recording</button>
+    <div className={`app${dark ? ' dark' : ''}`}>
+      <header className="bar">
+        <div className="bar-inner">
+          <span className="brand">SmoothRoute</span>
+          {!recording &&
+            (screen === 'map' ? (
+              <button className="textbtn" onClick={() => setScreen('record')}>Recorder</button>
+            ) : (
+              <button className="textbtn" onClick={() => setScreen('map')}>Map</button>
+            ))}
         </div>
-      )}
-    </main>
+        <div className="centerline" />
+      </header>
+      {body}
+    </div>
   )
 }

@@ -1,22 +1,21 @@
 import { MARK_TYPES } from '../utils/marks'
 
-export default function MarkPanel({ onMark, onUndo, marksCount }) {
+export default function MarkPanel({ counts, total, onMark, onUndo }) {
   return (
-    <div>
-      <p className="hint">
-        Tap right after you cross a bump. A passenger should do the tapping,
-        never the rider or driver.
-      </p>
-      <div className="marks">
+    <section>
+      <h2>Mark a bump</h2>
+      <p className="muted">Tap right after you cross it. A passenger taps, never the rider or driver.</p>
+      <div className="marklist">
         {MARK_TYPES.map((t) => (
-          <button key={t.key} className="mark" onClick={() => onMark(t.key)}>
-            {t.label}
+          <button key={t.key} className="markbtn" style={{ '--c': t.color }} onClick={() => onMark(t.key)}>
+            <span className="label">{t.label}</span>
+            <span>{counts[t.key] || 0}</span>
           </button>
         ))}
       </div>
-      <button className="link" onClick={onUndo} disabled={marksCount === 0}>
-        Undo last mark
-      </button>
-    </div>
+      <div className="inline-actions">
+        <button className="textbtn" onClick={onUndo} disabled={total === 0}>Undo last mark</button>
+      </div>
+    </section>
   )
 }

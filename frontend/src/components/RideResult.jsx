@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import SessionMap from './SessionMap'
 import UploadPanel from './UploadPanel'
+import { ActionBar, Alert, Row } from './ui'
 import { MARK_TYPES, SEVERITY_COLORS } from '../utils/marks'
 import { routePoints } from '../utils/route'
 import { matchByTime, matchByDistance } from '../utils/matching'
@@ -9,11 +10,11 @@ import { listSessions } from '../utils/storage'
 const pct = (x) => `${Math.round(x * 100)}%`
 
 function describeSettings(s) {
-  if (!s) return 'Settings were not recorded for this ride.'
+  if (!s) return 'The detection settings were not recorded for this ride.'
   const norm = s.mode === 'normalised'
-  return `${norm ? 'Jolt divided by speed' : 'Plain jolt'}, threshold ${
-    norm ? s.thresholdNorm : s.threshold
-  }${norm ? '' : ' m/s²'}, minimum speed ${Math.round(s.minSpeed * 3.6)} km/h, pause ${s.pause} s`
+  return `Detection used ${norm ? 'jolt divided by speed' : 'plain jolt'}, threshold ${
+    norm ? s.thresholdNorm : `${s.threshold} m/s²`
+  }, minimum speed ${Math.round(s.minSpeed * 3.6)} km/h, pause ${s.pause} s.`
 }
 
 // Shown after a ride finishes, and when you open a saved ride.
@@ -27,7 +28,7 @@ export default function RideResult({ result, apiBase, deviceId, onUploaded, onDo
     detections.some((d) => d.lat != null && d.lng != null)
   const interrupted = result.status !== 'finished'
 
-  // Other saved rides that have marks: they can act as the "answer key" (for example a survey walk).
+  // Other saved rides that have marks can act as the answer key (for example a survey walk).
   const [references, setReferences] = useState([])
   const [refId, setRefId] = useState('')
   useEffect(() => {
@@ -47,7 +48,7 @@ export default function RideResult({ result, apiBase, deviceId, onUploaded, onDo
   let how = ''
   if (marks.length > 0) {
     comparison = matchByTime(detections, marks)
-    how = 'Matched by time: a detection counts if it happened up to 2 s before the tap or 0.5 s after.'
+    how = 'Matched by time: a detection counts if it happened up to 2 seconds before the tap or half a second after.'
   } else {
     const ref = references.find((r) => String(r.id) === refId)
     if (ref) {
@@ -62,101 +63,95 @@ export default function RideResult({ result, apiBase, deviceId, onUploaded, onDo
   }))
 
   return (
-    <div className="card">
-      <h1>{interrupted ? 'Recovered ride' : 'Ride summary'}</h1>
-      {interrupted && (
-        <p className="hint">
-          This ride was interrupted (the page was reloaded or closed). It shows
-          everything saved up to the last autosave.
-        </p>
-      )}
-      <ul>
-        <li>Started: <b>{new Date(startedAt).toLocaleString()}</b></li>
-        <li>Duration: <b>{Math.round(seconds)} s</b></li>
-        <li>Readings: <b>{samples.length}</b> (about {perSecond} per second)</li>
-        <li>Bumps marked by hand: <b>{marks.length}</b></li>
-        <li>
-          Bumps detected automatically: <b>{detections.length}</b>
-          {detections.length > 0 &&
-            ` (${bySeverity.map((s) => `${s.n} ${s.k}`).join(', ')})`}
-        </li>
-      </ul>
+    <main className="page">
+      <section>
+        <h1>{interrupted ? 'Recovered ride' : 'Ride summary'}</h1>
+        {interrupted && (
+          <Alert>
+            This ride was interrupted because the page was reloaded or closed. It shows everything
+            saved up to the last autosave.
+          </Alert>
+        )}
+        <dl className="rows">
+          <Row label="Started" value={new Date(startedAt).toLocaleString()} />
+          <Row label="Duration" value={`${Math.round(seconds)} s`} />
+          <Row label="Readings" value={`${samples.length}, about ${perSecond} per second`} />
+          <Row label="Bumps marked by hand" value={marks.length} />
+          <Row
+            label="Bumps detected"
+            value={
+              detections.length === 0
+                ? 0
+                : `${detections.length} (${bySeverity.map((s) => `${s.n} ${s.k}`).join(', ')})`
+            }
+          />
+        </dl>
+      </section>
 
-      <h2>Automatic detection check</h2>
-      <p className="hint">{describeSettings(result.settings)}</p>
-
-      {marks.length === 0 && (
-        <label>Compare with marks from another saved ride (for example a survey walk)
-          <select value={refId} onChange={(e) => setRefId(e.target.value)}>
-            <option value="">Choose a ride...</option>
-            {references.map((r) => (
-              <option key={r.id} value={r.id}>
-                {new Date(r.startedAt).toLocaleString()} ({(r.marks || []).length} marks)
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      {comparison ? (
-        <>
-          <div className="grid">
-            <div className="stat">
-              <span>Marks found</span>
-              <b>{comparison.found}/{comparison.total}</b>
-              <small>{comparison.rate == null ? '' : pct(comparison.rate)} detection rate</small>
-            </div>
-            <div className="stat">
-              <span>False alarms</span>
-              <b>{comparison.falseAlarms.length}</b>
-              <small>detected, but not marked</small>
-            </div>
-          </div>
-          <p className="hint">
-            Missed: {comparison.missed.length}. {how} A false alarm can also be a real
-            bump you forgot to mark.
-          </p>
-        </>
-      ) : (
-        marks.length === 0 && (
-          <p className="hint">
-            No marks in this ride, so there is nothing to compare with yet. Choose another ride above.
-          </p>
-        )
-      )}
+      <section>
+        <h2>Detection check</h2>
+        {marks.length === 0 && (
+          <label className="field">
+            Compare with the marks of another saved ride, such as a survey walk
+            <select value={refId} onChange={(e) => setRefId(e.target.value)}>
+              <option value="">Choose a ride</option>
+              {references.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {new Date(r.startedAt).toLocaleString()}, {(r.marks || []).length} marks
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {comparison ? (
+          <>
+            <p className="verdict">
+              <b>{comparison.found} of {comparison.total}</b> marked bumps were found
+              {comparison.rate == null ? '' : ` (${pct(comparison.rate)})`}.{' '}
+              <b>{comparison.falseAlarms.length}</b> false {comparison.falseAlarms.length === 1 ? 'alarm' : 'alarms'},{' '}
+              <b>{comparison.missed.length}</b> missed.
+            </p>
+            <p className="muted small">
+              {how} A false alarm can also be a real bump you did not mark.
+            </p>
+          </>
+        ) : (
+          marks.length === 0 && <p>This ride has no marks, so choose another ride above to compare with.</p>
+        )}
+        <p className="muted small">{describeSettings(result.settings)}</p>
+      </section>
 
       <UploadPanel result={result} apiBase={apiBase} deviceId={deviceId} onUploaded={onUploaded} />
 
-      {hasPosition ? (
-        <>
-          <SessionMap samples={samples} marks={marks} detections={detections} />
-          <div className="legend">
-            {MARK_TYPES.map((t) => (
-              <span key={t.key}>
-                <i style={{ background: t.color }} />
-                {t.label} ({marks.filter((m) => m.type === t.key).length})
-              </span>
-            ))}
-          </div>
-          <div className="legend">
-            {Object.entries(SEVERITY_COLORS).map(([k, c]) => (
-              <span key={k}>
-                <i className="ring" style={{ borderColor: c }} />
-                detected {k}
-              </span>
-            ))}
-          </div>
-          <p className="hint">Filled dots = marked by hand. Rings = found by the app. The map needs internet.</p>
-        </>
-      ) : (
-        <p className="warn">
-          No GPS positions were recorded, so there is no route to draw (this
-          happens on a laptop or before GPS gets a fix).
-        </p>
-      )}
+      <section>
+        <h2>Route</h2>
+        {hasPosition ? (
+          <>
+            <SessionMap samples={samples} marks={marks} detections={detections} />
+            <div className="legend">
+              {MARK_TYPES.map((t) => (
+                <span key={t.key} style={{ '--c': t.color }}>
+                  {t.label} marked ({marks.filter((m) => m.type === t.key).length})
+                </span>
+              ))}
+              {Object.entries(SEVERITY_COLORS).map(([k, c]) => (
+                <span key={k} className="ring" style={{ '--c': c }}>detected {k}</span>
+              ))}
+            </div>
+            <p className="muted small">Filled dots are bumps you marked. Rings are bumps the app found. The map needs internet.</p>
+          </>
+        ) : (
+          <Alert>
+            No GPS positions were recorded, so there is no route to draw. This happens on a laptop,
+            or before the GPS gets a fix.
+          </Alert>
+        )}
+      </section>
 
-      <button className="primary" onClick={onDownload}>Download CSV</button>
-      <button className="link" onClick={onClose}>Back</button>
-    </div>
+      <ActionBar>
+        <button className="secondary" onClick={onDownload}>Download CSV</button>
+        <button className="secondary" onClick={onClose}>Done</button>
+      </ActionBar>
+    </main>
   )
 }
